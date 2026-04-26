@@ -52,7 +52,7 @@ def _parsear_nome_arquivo(nome):
         "data_arquivo": data,
     }
 
-def _processar_csvinho, meta):
+def _processar_csv(caminho, meta):
     """Lê um CSV e retorna DataFrame padronizado."""
     try:
         df = pd.read_csv(caminho, sep=";", encoding="latin-1", decimal=",")
