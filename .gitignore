@@ -1,1 +1,20 @@
+# Dados sensíveis — NÃO subir para o GitHub
+dados/uploads/*.csv
+dados/historico/*.csv
+dados/historico/*.parquet
 
+# Exceções: manter estrutura de pastas
+!dados/uploads/.gitkeep
+!dados/historico/.gitkeep
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.env
+venv/
+.venv/
+
+# Sistema
+.DS_Store
+Thumbs.db
