@@ -60,34 +60,33 @@ def sidebar_upload_e_filtros(df):
     )
 
     if arquivos_upload:
-    os.makedirs(DIR_UPLOADS, exist_ok=True)
-    salvos = 0
-    for arq in arquivos_upload:
-        destino = os.path.join(DIR_UPLOADS, arq.name)
-        with open(destino, "wb") as f:
-            f.write(arq.read())
-        salvos += 1
-    st.sidebar.success(f"✅ {salvos} arquivo(s) salvo(s)!")
+        os.makedirs(DIR_UPLOADS, exist_ok=True)
+        salvos = 0
+        for arq in arquivos_upload:
+            destino = os.path.join(DIR_UPLOADS, arq.name)
+            with open(destino, "wb") as f:
+                f.write(arq.read())
+            salvos += 1
+        st.sidebar.success(f"✅ {salvos} arquivo(s) salvo(s)!")
 
-    if st.sidebar.button("▶️ Processar agora", type="primary"):
-        with st.spinner("Processando CSVs..."):
-            processar.processar_novos()   # ← só aqui, ao clicar
-        st.cache_data.clear()
-        st.rerun()
+        if st.sidebar.button("▶️ Processar agora", type="primary"):
+            with st.spinner("Processando CSVs..."):
+                processar.processar_novos()
+            st.cache_data.clear()
+            st.rerun()
 
     st.sidebar.markdown("---")
 
-    # ── Filtros (só se houver dados) ──────────────────────────────────────────
+    # ── Filtros ───────────────────────────────────────────────────────────────
     filtros = {}
 
     if df.empty:
         st.sidebar.warning("Nenhum dado carregado ainda.")
         return filtros
 
-    # Período
     st.sidebar.subheader("🔍 Filtros")
     datas_disponiveis = sorted(df["data_arquivo"].dropna().dt.date.unique())
-    
+
     if len(datas_disponiveis) >= 2:
         filtros["data_inicio"], filtros["data_fim"] = st.sidebar.date_input(
             "Período",
@@ -100,24 +99,19 @@ def sidebar_upload_e_filtros(df):
         filtros["data_fim"]    = filtros["data_inicio"]
         st.sidebar.info(f"Data: {filtros['data_inicio']}")
 
-    # Estado
     estados = ["Todos"] + sorted(df["uf"].dropna().unique().tolist())
     filtros["estado"] = st.sidebar.selectbox("Estado (UF)", estados)
 
-    # Departamento
     deptos = ["Todos"] + sorted(df["departamento"].dropna().unique().tolist())
     filtros["departamento"] = st.sidebar.selectbox("Departamento", deptos)
 
-    # Filial
     filiais = ["Todas"] + sorted(df["filial_nome"].dropna().unique().tolist())
     filtros["filial"] = st.sidebar.selectbox("Filial", filiais)
 
-    # Somente críticos
     filtros["somente_criticos"] = st.sidebar.checkbox(
         "⚠️ Somente críticos (+90 dias)", value=False
     )
 
-    # Bucket de idade
     st.sidebar.markdown("**Faixa de dias parado:**")
     opcoes_bucket = [
         "Todos", "0–30 dias", "31–60 dias", "61–90 dias",
@@ -125,10 +119,8 @@ def sidebar_upload_e_filtros(df):
     ]
     filtros["bucket"] = st.sidebar.selectbox("Faixa de dias", opcoes_bucket)
 
-    # Giro
     filtros["giro_zero"] = st.sidebar.checkbox("Apenas giro = 0", value=False)
 
-    # Faixa de valor parado
     val_max = float(df["valor_custo"].max() or 100000)
     filtros["valor_min"], filtros["valor_max"] = st.sidebar.slider(
         "Faixa de valor parado (R$)",
