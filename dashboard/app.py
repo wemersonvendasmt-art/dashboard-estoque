@@ -70,13 +70,21 @@ def sidebar_upload_e_filtros(df):
             salvos += 1
         st.sidebar.success(f"✅ {salvos} arquivo(s) salvo(s)!")
 
-        if st.sidebar.button("▶️ Processar agora", type="primary"):
-    with st.spinner("Processando CSVs..."):
-        processar.processar_novos()
-    st.cache_data.clear()
-    st.rerun()
+           if arquivos_upload:
+        os.makedirs(DIR_UPLOADS, exist_ok=True)
+        salvos = 0
+        for arq in arquivos_upload:
+            destino = os.path.join(DIR_UPLOADS, arq.name)
+            with open(destino, "wb") as f:
+                f.write(arq.read())
+            salvos += 1
+        st.sidebar.success(f"✅ {salvos} arquivo(s) salvo(s)!")
 
-    st.sidebar.markdown("---")
+        if st.sidebar.button("▶️ Processar agora", type="primary"):
+            with st.spinner("Processando CSVs..."):
+                processar.processar_novos()
+            st.cache_data.clear()
+            st.rerun()
 
     # ── Filtros ───────────────────────────────────────────────────────────────
     filtros = {}
