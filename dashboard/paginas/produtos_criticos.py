@@ -313,4 +313,161 @@ def pagina_produtos_criticos(df):
                 color="impacto_estimado",
                 color_continuous_scale="Greens",
                 labels={"filial_destino": "Filial Destino", "impacto_estimado": "Impacto (R$)"},
-                text=impacto_destino["impac
+                text=impacto_destino["impacto_estimado"].apply(formatar_brl),
+                title="💚 Impacto Estimado por Filial Destino"
+            )
+            fig_transf.update_traces(textposition="outside")
+            fig_transf.update_layout(
+                height=350, showlegend=False,
+                plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+                font_color="white", coloraxis_showscale=False
+            )
+            st.plotly_chart(fig_transf, use_container_width=True)
+
+            # Guardar cópia para exportação antes de formatar
+            df_transf_export = df_transf.copy()
+
+            df_transf_exib = df_transf.copy()
+            df_transf_exib["impacto_estimado"] = df_transf_exib["impacto_estimado"].apply(formatar_brl)
+            df_transf_exib["ultima_venda"] = pd.to_datetime(
+                df_transf_exib["ultima_venda"], errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+
+            st.dataframe(
+                df_transf_exib.rename(columns={
+                    "codigo_sku":       "SKU",
+                    "descricao":        "Descrição",
+                    "filial_origem":    "Origem",
+                    "saldo_origem":     "Saldo Origem",
+                    "dias_origem":      "Dias Parado",
+                    "filial_destino":   "Destino",
+                    "giro_destino":     "Giro Destino",
+                    "ultima_venda":     "Últ. Venda Destino",
+                    "qty_sugerida":     "Qty Sugerida",
+                    "impacto_estimado": "Impacto (R$)"
+                }),
+                use_container_width=True,
+                hide_index=True,
+                height=420
+            )
+
+            excel_transf = exportar_excel(df_transf_export)
+            st.download_button(
+                label="⬇️ Exportar Transferências Excel",
+                data=excel_transf,
+                file_name="sugestoes_transferencia.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # SUB-ABA 3 — Por ação recomendada
+    # ═══════════════════════════════════════════════════════════════════════
+    with sub3:
+        st.markdown("### 📌 Produtos Agrupados por Ação Recomendada")
+
+        df_acoes = df_critico.copy()
+        df_acoes["sugestao"] = df_acoes.apply(gerar_sugestao, axis=1)
+
+        resumo = (
+            df_acoes.groupby("sugestao")
+            .agg(
+                qtd_skus    = ("codigo_sku",  "nunique"),
+                valor_total = ("valor_custo", "sum"),
+                filiais     = ("filial_nome", "nunique")
+            )
+            .reset_index()
+            .sort_values("valor_total", ascending=False)
+        )
+
+        col_r1, col_r2 = st.columns([2, 3])
+
+        with col_r1:
+            st.markdown("**Resumo por Ação**")
+            resumo_exib = resumo.copy()
+            resumo_exib["Valor Total"] = resumo_exib["valor_total"].apply(formatar_brl)
+            resumo_exib["SKUs"]        = resumo_exib["qtd_skus"].apply(formatar_int)
+            resumo_exib["Filiais"]     = resumo_exib["filiais"].apply(formatar_int)
+            st.dataframe(
+                resumo_exib[["sugestao", "SKUs", "Filiais", "Valor Total"]].rename(
+                    columns={"sugestao": "Ação Recomendada"}
+                ),
+                use_container_width=True,
+                hide_index=True
+            )
+
+        with col_r2:
+            fig_acoes = px.pie(
+                resumo,
+                names="sugestao",
+                values="valor_total",
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set2,
+                title="Distribuição do Valor Parado por Ação"
+            )
+            fig_acoes.update_layout(
+                height=340,
+                plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+                font_color="white"
+            )
+            st.plotly_chart(fig_acoes, use_container_width=True)
+
+        st.markdown("---")
+        st.markdown("**🔍 Ver itens por ação:**")
+
+        acoes_unicas = sorted(df_acoes["sugestao"].unique().tolist())
+        acao_sel = st.selectbox("Selecione uma ação:", acoes_unicas)
+
+        if acao_sel:
+            cols_grupo = [
+                c for c in [
+                    "filial_nome", "departamento", "codigo_sku", "descricao",
+                    "saldo", "dias_estoque", "ultima_venda",
+                    "valor_custo", "mkp_pct", "giro"
+                ] if c in df_acoes.columns
+            ]
+
+            df_grupo_raw = (
+                df_acoes[df_acoes["sugestao"] == acao_sel][cols_grupo]
+                .sort_values("valor_custo", ascending=False)
+                .copy()
+            )
+
+            # Guardar cópia numérica para exportação
+            df_grupo_export = df_grupo_raw.copy()
+
+            df_grupo_exib = df_grupo_raw.copy()
+            df_grupo_exib["valor_custo"] = df_grupo_exib["valor_custo"].apply(formatar_brl)
+            if "dias_estoque" in df_grupo_exib.columns:
+                df_grupo_exib["dias_estoque"] = df_grupo_exib["dias_estoque"].apply(
+                    lambda x: f"{x:.0f}d" if pd.notna(x) else "-"
+                )
+            if "mkp_pct" in df_grupo_exib.columns:
+                df_grupo_exib["mkp_pct"] = df_grupo_exib["mkp_pct"].apply(
+                    lambda x: f"{x:.1f}%" if pd.notna(x) else "-"
+                )
+
+            st.dataframe(
+                df_grupo_exib.rename(columns={
+                    "filial_nome":  "Filial",
+                    "departamento": "Depto",
+                    "codigo_sku":   "SKU",
+                    "descricao":    "Descrição",
+                    "saldo":        "Saldo",
+                    "dias_estoque": "Dias",
+                    "ultima_venda": "Últ. Venda",
+                    "valor_custo":  "Custo (R$)",
+                    "mkp_pct":      "%MKP",
+                    "giro":         "Giro"
+                }),
+                use_container_width=True,
+                hide_index=True,
+                height=420
+            )
+
+            excel_grupo = exportar_excel(df_grupo_export)
+            st.download_button(
+                label=f"⬇️ Exportar '{acao_sel[:20].strip()}' Excel",
+                data=excel_grupo,
+                file_name=f"criticos_{acao_sel[:20].strip()}.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
