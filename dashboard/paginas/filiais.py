@@ -23,9 +23,9 @@ def pagina_filiais(df):
         df_critico
         .groupby(["filial_nome", "uf"])
         .agg(
-            valor_parado   = ("valor_custo",  "sum"),
-            skus_criticos  = ("codigo_sku",   "nunique"),
-            dias_medio     = ("dias_estoque", "mean"),
+            valor_parado  = ("valor_custo",  "sum"),
+            skus_criticos = ("codigo_sku",   "nunique"),
+            dias_medio    = ("dias_estoque", "mean"),
         )
         .reset_index()
         .sort_values("valor_parado", ascending=False)
@@ -34,7 +34,6 @@ def pagina_filiais(df):
         ranking["valor_parado"] / ranking["valor_parado"].sum() * 100
     )
 
-    # ── Gráfico de barras horizontal ──────────────────────────────────────────
     col1, col2 = st.columns([3, 2])
 
     with col1:
@@ -138,149 +137,163 @@ def pagina_filiais(df):
             "⚠️ São necessários dados de pelo menos **2 datas diferentes** "
             "para calcular a recuperação. Continue subindo os CSVs diários!"
         )
-    else:
-        data_atual   = datas_unicas[-1]
-        data_anterior = datas_unicas[-2]
+        return
 
-        df_atual = df[df["data_arquivo"] == data_atual]
-        df_ant   = df[df["data_arquivo"] == data_anterior]
+    data_atual    = datas_unicas[-1]
+    data_anterior = datas_unicas[-2]
 
-        # Itens críticos no D-1
-        criticos_ant = df_ant[df_ant["critico"] == True][
-    ["codigo_sku", "filial_nome", "ultima_venda", "valor_custo", "dias_estoque"]
-]
+    df_atual = df[df["data_arquivo"] == data_atual]
+    df_ant   = df[df["data_arquivo"] == data_anterior]
 
-# DEPOIS — defensivo
-colunas_desejadas = _safe_cols(
-    df_ant,
-    ["codigo_sku", "filial_nome", "ultima_venda", "valor_custo", "dias_estoque"]
-)
-criticos_ant = df_ant[df_ant["critico"] == True][colunas_desejadas]
+    # Colunas obrigatórias para o merge — verificação defensiva
+    colunas_ant = ["filial_key", "codigo_sku", "ultima_venda",
+                   "valor_custo", "saldo", "dias_estoque"]
+    colunas_ant = [c for c in colunas_ant if c in df_ant.columns]
 
-        # Estado desses itens no dia atual
-        estado_atual = df_atual[
-            ["filial_key", "codigo_sku", "valor_custo", "saldo",
-             "ultima_venda", "filial_nome", "departamento"]
-        ].rename(columns={
-            "valor_custo": "valor_atual",
-            "saldo":       "saldo_atual",
-            "ultima_venda":"ultima_venda_atual"
+    criticos_ant = (
+        df_ant[df_ant["critico"] == True][colunas_ant]
+        .rename(columns={
+            "valor_custo":  "valor_ant",
+            "saldo":        "saldo_ant",
+            "ultima_venda": "ultima_venda_ant",
         })
+    )
 
-        # JOIN
-        comparativo = criticos_ant.merge(
-            estado_atual,
-            on=["filial_key", "codigo_sku"],
-            how="inner"
+    colunas_atual = ["filial_key", "codigo_sku", "valor_custo", "saldo",
+                     "ultima_venda", "filial_nome", "departamento"]
+    colunas_atual = [c for c in colunas_atual if c in df_atual.columns]
+
+    estado_atual = (
+        df_atual[colunas_atual]
+        .rename(columns={
+            "valor_custo":  "valor_atual",
+            "saldo":        "saldo_atual",
+            "ultima_venda": "ultima_venda_atual",
+        })
+    )
+
+    # JOIN por filial + SKU
+    comparativo = criticos_ant.merge(
+        estado_atual,
+        on=["filial_key", "codigo_sku"],
+        how="inner"
+    )
+
+    if comparativo.empty:
+        st.warning("Nenhum SKU em comum entre as duas datas para comparação.")
+        return
+
+    # Critério de recuperação
+    comparativo["saldo_reduziu"] = (
+        comparativo["saldo_atual"].fillna(0) <
+        comparativo["saldo_ant"].fillna(0)
+    )
+    comparativo["venda_nova"] = (
+        comparativo["ultima_venda_atual"].fillna(pd.NaT) >
+        comparativo["ultima_venda_ant"].fillna(pd.NaT)
+    )
+    comparativo["recuperado"] = (
+        comparativo["saldo_reduziu"] | comparativo["venda_nova"]
+    )
+    comparativo["valor_recuperado"] = (
+        comparativo["valor_ant"].fillna(0) -
+        comparativo["valor_atual"].fillna(0)
+    ).clip(lower=0)
+
+    recuperados = comparativo[comparativo["recuperado"] == True]
+
+    if recuperados.empty:
+        st.warning("Nenhuma recuperação detectada entre as duas últimas datas.")
+        return
+
+    rank_rec = (
+        recuperados
+        .groupby(["filial_nome", "departamento"])
+        .agg(
+            skus_recuperados = ("codigo_sku",       "nunique"),
+            valor_recuperado = ("valor_recuperado", "sum"),
+        )
+        .reset_index()
+        .sort_values("valor_recuperado", ascending=False)
+    )
+    rank_rec["taxa"] = (
+        rank_rec["valor_recuperado"] /
+        rank_rec["valor_recuperado"].sum() * 100
+    )
+
+    col6, col7 = st.columns([3, 2])
+
+    with col6:
+        fig_rec = px.bar(
+            rank_rec,
+            x="valor_recuperado",
+            y="filial_nome",
+            orientation="h",
+            color="departamento",
+            labels={
+                "valor_recuperado": "R$ Recuperado",
+                "filial_nome": "Filial"
+            },
+            text=rank_rec["valor_recuperado"].apply(formatar_brl),
+            title="🏆 Filiais que mais destravaram estoque crítico"
+        )
+        fig_rec.update_traces(textposition="outside")
+        fig_rec.update_layout(
+            height=400,
+            plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
+            font_color="white",
+            yaxis={"categoryorder": "total ascending"}
+        )
+        st.plotly_chart(fig_rec, use_container_width=True)
+
+    with col7:
+        st.markdown("**📋 Detalhamento**")
+        rank_rec["Valor Recuperado"] = rank_rec["valor_recuperado"].apply(formatar_brl)
+        rank_rec["SKUs Recuperados"] = rank_rec["skus_recuperados"].apply(formatar_int)
+        rank_rec["Taxa"]             = rank_rec["taxa"].apply(formatar_pct)
+        st.dataframe(
+            rank_rec[[
+                "filial_nome", "departamento",
+                "SKUs Recuperados", "Valor Recuperado", "Taxa"
+            ]].rename(columns={
+                "filial_nome":  "Filial",
+                "departamento": "Depto"
+            }),
+            use_container_width=True,
+            hide_index=True
         )
 
-        # Critério de recuperação:
-        # saldo reduziu OU última venda foi atualizada
-        comparativo["saldo_reduziu"] = (
-            comparativo["saldo_atual"].fillna(0) <
-            comparativo["saldo_ant"].fillna(0)
-        )
-        comparativo["venda_nova"] = (
-            comparativo["ultima_venda_atual"].fillna(pd.NaT) >
-            comparativo["ultima_venda_ant"].fillna(pd.NaT)
-        )
-        comparativo["recuperado"] = (
-            comparativo["saldo_reduziu"] | comparativo["venda_nova"]
-        )
-        comparativo["valor_recuperado"] = (
-            comparativo["valor_ant"].fillna(0) -
-            comparativo["valor_atual"].fillna(0)
-        ).clip(lower=0)
+    # ── Detalhe por SKU recuperado ────────────────────────────────────────────
+    with st.expander("🔍 Ver todos os SKUs recuperados (detalhe)"):
+        cols_detalhe = [c for c in [
+            "filial_nome", "departamento", "codigo_sku",
+            "saldo_ant", "saldo_atual", "valor_ant",
+            "valor_atual", "valor_recuperado"
+        ] if c in recuperados.columns]
 
-        recuperados = comparativo[comparativo["recuperado"] == True]
+        detalhe = recuperados[cols_detalhe].copy()
 
-        if recuperados.empty:
-            st.warning("Nenhuma recuperação detectada entre as duas últimas datas.")
-        else:
-            rank_rec = (
-                recuperados
-                .groupby(["filial_nome", "departamento"])
-                .agg(
-                    skus_recuperados  = ("codigo_sku",       "nunique"),
-                    valor_recuperado  = ("valor_recuperado", "sum"),
-                )
-                .reset_index()
-                .sort_values("valor_recuperado", ascending=False)
+        if "saldo_ant" in detalhe.columns:
+            detalhe["Saldo Ant."]  = detalhe["saldo_ant"].apply(
+                lambda x: f"{x:.2f}" if pd.notna(x) else "-"
             )
-            rank_rec["taxa"] = (
-                rank_rec["valor_recuperado"] /
-                rank_rec["valor_recuperado"].sum() * 100
+        if "saldo_atual" in detalhe.columns:
+            detalhe["Saldo Atual"] = detalhe["saldo_atual"].apply(
+                lambda x: f"{x:.2f}" if pd.notna(x) else "-"
             )
+        detalhe["Valor Rec."] = detalhe["valor_recuperado"].apply(formatar_brl)
 
-            col6, col7 = st.columns([3, 2])
+        cols_exibir = [c for c in [
+            "filial_nome", "departamento", "codigo_sku",
+            "Saldo Ant.", "Saldo Atual", "Valor Rec."
+        ] if c in detalhe.columns]
 
-            with col6:
-                fig_rec = px.bar(
-                    rank_rec,
-                    x="valor_recuperado",
-                    y="filial_nome",
-                    orientation="h",
-                    color="departamento",
-                    labels={
-                        "valor_recuperado": "R$ Recuperado",
-                        "filial_nome": "Filial"
-                    },
-                    text=rank_rec["valor_recuperado"].apply(formatar_brl),
-                    title="🏆 Filiais que mais destravaram estoque crítico"
-                )
-                fig_rec.update_traces(textposition="outside")
-                fig_rec.update_layout(
-                    height=400,
-                    plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-                    font_color="white",
-                    yaxis={"categoryorder": "total ascending"}
-                )
-                st.plotly_chart(fig_rec, use_container_width=True)
-
-            with col7:
-                st.markdown("**📋 Detalhamento**")
-                rank_rec["Valor Recuperado"] = rank_rec["valor_recuperado"].apply(
-                    formatar_brl
-                )
-                rank_rec["SKUs Recuperados"] = rank_rec["skus_recuperados"].apply(
-                    formatar_int
-                )
-                rank_rec["Taxa"] = rank_rec["taxa"].apply(formatar_pct)
-                st.dataframe(
-                    rank_rec[[
-                        "filial_nome", "departamento",
-                        "SKUs Recuperados", "Valor Recuperado", "Taxa"
-                    ]].rename(columns={
-                        "filial_nome":   "Filial",
-                        "departamento":  "Depto"
-                    }),
-                    use_container_width=True,
-                    hide_index=True
-                )
-
-            # ── Detalhe por SKU recuperado ────────────────────────────────────
-            with st.expander("🔍 Ver todos os SKUs recuperados (detalhe)"):
-                detalhe = recuperados[[
-                    "filial_nome", "departamento", "codigo_sku",
-                    "saldo_ant", "saldo_atual", "valor_ant",
-                    "valor_atual", "valor_recuperado"
-                ]].copy()
-                detalhe["Saldo Ant."]   = detalhe["saldo_ant"].apply(
-                    lambda x: f"{x:.2f}" if pd.notna(x) else "-"
-                )
-                detalhe["Saldo Atual"]  = detalhe["saldo_atual"].apply(
-                    lambda x: f"{x:.2f}" if pd.notna(x) else "-"
-                )
-                detalhe["Valor Rec."]   = detalhe["valor_recuperado"].apply(formatar_brl)
-                st.dataframe(
-                    detalhe[[
-                        "filial_nome", "departamento", "codigo_sku",
-                        "Saldo Ant.", "Saldo Atual", "Valor Rec."
-                    ]].rename(columns={
-                        "filial_nome":  "Filial",
-                        "departamento": "Depto",
-                        "codigo_sku":   "SKU"
-                    }),
-                    use_container_width=True,
-                    hide_index=True
-                )
+        st.dataframe(
+            detalhe[cols_exibir].rename(columns={
+                "filial_nome":  "Filial",
+                "departamento": "Depto",
+                "codigo_sku":   "SKU"
+            }),
+            use_container_width=True,
+            hide_index=True
+        )
