@@ -1,4 +1,16 @@
 # etl/config.py
+import os
+
+# Diretório temporário para uploads (dentro do container — volátil, tudo bem)
+DIR_UPLOADS   = os.path.join(os.path.dirname(__file__), "..", "uploads")
+
+# Compatibilidade: dashboard/app.py usa ARQUIVO_HISTORICO só para checar existência
+# Com Supabase isso não é mais necessário — mantemos como dummy
+ARQUIVO_HISTORICO = "__supabase__"
+DIR_HISTORICO     = DIR_UPLOADS
+
+os.makedirs(DIR_UPLOADS, exist_ok=True)
+
 # Configurações centrais do ETL
 
 # ── Separador do CSV exportado pelo QlikView ──────────────────────────────────
@@ -37,10 +49,8 @@ import os
 
 BASE_DIR      = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DIR_UPLOADS   = os.path.join(BASE_DIR, "dados", "uploads")
-DIR_HISTORICO = os.path.join(BASE_DIR, "dados", "historico")
 DIR_DIMENSOES = os.path.join(BASE_DIR, "dados", "dimensoes")
 
-ARQUIVO_HISTORICO  = os.path.join(DIR_HISTORICO, "historico_consolidado.parquet")
 ARQUIVO_FILIAIS    = os.path.join(DIR_DIMENSOES, "dim_filiais.csv")
 ARQUIVO_DEPTOS     = os.path.join(DIR_DIMENSOES, "dim_deptos.csv")
 ARQUIVO_PRODUTOS   = os.path.join(DIR_DIMENSOES, "dim_produtos.csv")
