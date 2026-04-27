@@ -147,12 +147,15 @@ def pagina_filiais(df):
 
         # Itens críticos no D-1
         criticos_ant = df_ant[df_ant["critico"] == True][
-            ["filial_key", "codigo_sku", "valor_custo", "saldo", "ultima_venda"]
-        ].rename(columns={
-            "valor_custo": "valor_ant",
-            "saldo":       "saldo_ant",
-            "ultima_venda":"ultima_venda_ant"
-        })
+    ["codigo_sku", "filial_nome", "ultima_venda", "valor_custo", "dias_estoque"]
+]
+
+# DEPOIS — defensivo
+colunas_desejadas = _safe_cols(
+    df_ant,
+    ["codigo_sku", "filial_nome", "ultima_venda", "valor_custo", "dias_estoque"]
+)
+criticos_ant = df_ant[df_ant["critico"] == True][colunas_desejadas]
 
         # Estado desses itens no dia atual
         estado_atual = df_atual[
