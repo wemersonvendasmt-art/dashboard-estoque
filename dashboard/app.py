@@ -41,13 +41,7 @@ def sidebar_upload_e_filtros(df):
     st.sidebar.image("https://img.icons8.com/fluency/96/box.png", width=60)
     st.sidebar.title("📦 Dashboard Estoque")
     st.sidebar.markdown("---")
-    
-if st.sidebar.button("🗑️ Limpar histórico", type="secondary"):
-    if os.path.exists(ARQUIVO_HISTORICO):
-        os.remove(ARQUIVO_HISTORICO)
-        st.cache_data.clear()
-        st.sidebar.success("Histórico limpo! Reprocesse os CSVs.")
-        st.rerun()
+
     st.sidebar.subheader("📤 Subir CSVs do dia")
     arquivos_upload = st.sidebar.file_uploader(
         "Arraste os CSVs aqui (até 55 arquivos)",
