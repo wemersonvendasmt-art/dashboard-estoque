@@ -6,7 +6,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "etl"))
 import streamlit as st
 import pandas as pd
 
-# ── Configuração da página ────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Dashboard Estoque | Compras",
     page_icon="📦",
@@ -14,11 +13,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# ── Imports internos ──────────────────────────────────────────────────────────
 from config import ARQUIVO_HISTORICO, DIR_UPLOADS, DIR_HISTORICO
 import processar
 
-# ── CSS customizado ───────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .stMetric { background: #1a1f2e; border-radius: 10px; padding: 12px; }
@@ -27,14 +24,11 @@ st.markdown("""
     .block-container { padding-top: 1rem; }
     h1 { color: #1f77b4; }
     .stTabs [data-baseweb="tab"] { font-size: 15px; font-weight: 600; }
-    .upload-box { border: 2px dashed #1f77b4; border-radius: 10px; padding: 20px; text-align: center; }
 </style>
 """, unsafe_allow_html=True)
 
-# ── Carregar dados ────────────────────────────────────────────────────────────
 @st.cache_data(ttl=300)
 def carregar_dados():
-    import sys, os
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "etl"))
     import storage
     df = storage.carregar_historico()
@@ -42,16 +36,12 @@ def carregar_dados():
         return df
     df["data_arquivo"] = pd.to_datetime(df["data_arquivo"], errors="coerce")
     return df
-    
-# ── Sidebar: Upload + Filtros ─────────────────────────────────────────────────
+
 def sidebar_upload_e_filtros(df):
-    st.sidebar.image(
-        "https://img.icons8.com/fluency/96/box.png", width=60
-    )
+    st.sidebar.image("https://img.icons8.com/fluency/96/box.png", width=60)
     st.sidebar.title("📦 Dashboard Estoque")
     st.sidebar.markdown("---")
 
-    # ── Upload de CSVs ────────────────────────────────────────────────────────
     st.sidebar.subheader("📤 Subir CSVs do dia")
     arquivos_upload = st.sidebar.file_uploader(
         "Arraste os CSVs aqui (até 55 arquivos)",
@@ -71,13 +61,13 @@ def sidebar_upload_e_filtros(df):
         st.sidebar.success(f"✅ {salvos} arquivo(s) salvo(s)!")
 
         if st.sidebar.button("▶️ Processar agora", type="primary"):
-    with st.spinner("Processando CSVs..."):
-    st.cache_data.clear()
-    st.rerun()
+            with st.spinner("Processando CSVs..."):
+                processar.processar_novos()
+            st.cache_data.clear()
+            st.rerun()
 
     st.sidebar.markdown("---")
 
-    # ── Filtros ───────────────────────────────────────────────────────────────
     filtros = {}
 
     if df.empty:
@@ -88,15 +78,20 @@ def sidebar_upload_e_filtros(df):
     datas_disponiveis = sorted(df["data_arquivo"].dropna().dt.date.unique())
 
     if len(datas_disponiveis) >= 2:
-        filtros["data_inicio"], filtros["data_fim"] = st.sidebar.date_input(
+        resultado = st.sidebar.date_input(
             "Período",
             value=(datas_disponiveis[-1], datas_disponiveis[-1]),
             min_value=datas_disponiveis[0],
             max_value=datas_disponiveis[-1]
         )
+        if isinstance(resultado, (list, tuple)) and len(resultado) == 2:
+            filtros["data_inicio"], filtros["data_fim"] = resultado
+        else:
+            filtros["data_inicio"] = resultado
+            filtros["data_fim"]    = resultado
     else:
         filtros["data_inicio"] = datas_disponiveis[-1] if datas_disponiveis else None
-        filtros["data_fim"] = filtros["data_inicio"]
+        filtros["data_fim"]    = filtros["data_inicio"]
         st.sidebar.info(f"Data: {filtros['data_inicio']}")
 
     estados = ["Todos"] + sorted(df["uf"].dropna().unique().tolist())
@@ -131,36 +126,29 @@ def sidebar_upload_e_filtros(df):
     )
 
     return filtros
-    
-# ── Aplicar filtros ao DataFrame ──────────────────────────────────────────────
+
 def aplicar_filtros(df, filtros):
     if df.empty or not filtros:
         return df
 
-    # Filtro de data
     if filtros.get("data_inicio") and filtros.get("data_fim"):
         df = df[
             (df["data_arquivo"].dt.date >= filtros["data_inicio"]) &
             (df["data_arquivo"].dt.date <= filtros["data_fim"])
         ]
 
-    # Estado
     if filtros.get("estado") and filtros["estado"] != "Todos":
         df = df[df["uf"] == filtros["estado"]]
 
-    # Departamento
     if filtros.get("departamento") and filtros["departamento"] != "Todos":
         df = df[df["departamento"] == filtros["departamento"]]
 
-    # Filial
     if filtros.get("filial") and filtros["filial"] != "Todas":
         df = df[df["filial_nome"] == filtros["filial"]]
 
-    # Somente críticos
     if filtros.get("somente_criticos"):
         df = df[df["critico"] == True]
 
-    # Bucket de dias
     bucket = filtros.get("bucket", "Todos")
     bucket_map = {
         "0–30 dias":    (0, 30),
@@ -177,11 +165,9 @@ def aplicar_filtros(df, filtros):
             (df["dias_estoque"].fillna(0) <= hi)
         ]
 
-    # Giro zero
     if filtros.get("giro_zero"):
         df = df[df["giro"].fillna(0) == 0]
 
-    # Faixa de valor
     if "valor_min" in filtros and "valor_max" in filtros:
         df = df[
             (df["valor_custo"].fillna(0) >= filtros["valor_min"]) &
@@ -190,7 +176,6 @@ def aplicar_filtros(df, filtros):
 
     return df
 
-# ── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     df_total = carregar_dados()
     filtros  = sidebar_upload_e_filtros(df_total)
@@ -200,11 +185,11 @@ def main():
 
     if df_total.empty:
         st.info(
-            "👈 Nenhum dado encontrado. Use o painel lateral para subir os CSVs do dia e clique em **Processar agora**."
+            "👈 Nenhum dado encontrado. Use o painel lateral para subir os CSVs do dia "
+            "e clique em **Processar agora**."
         )
         return
 
-    # ── Abas principais ───────────────────────────────────────────────────────
     aba1, aba2, aba3, aba4, aba5, aba6 = st.tabs([
         "📊 Visão Geral",
         "🏪 Filiais",
