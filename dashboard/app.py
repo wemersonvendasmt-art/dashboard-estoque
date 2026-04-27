@@ -71,10 +71,9 @@ def sidebar_upload_e_filtros(df):
         st.sidebar.success(f"✅ {salvos} arquivo(s) salvo(s)!")
 
         if st.sidebar.button("▶️ Processar agora", type="primary"):
-            with st.spinner("Processando CSVs..."):
-                processar.processar_novos()
-            st.cache_data.clear()
-            st.rerun()
+    with st.spinner("Processando CSVs..."):
+    st.cache_data.clear()
+    st.rerun()
 
     st.sidebar.markdown("---")
 
