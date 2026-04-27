@@ -38,10 +38,11 @@ def carregar_dados():
     sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "etl"))
     import storage
     df = storage.carregar_historico()
-    if not df.empty:
-        df["data_arquivo"] = pd.to_datetime(df["data_arquivo"], errors="coerce")
+    if df.empty:
+        return df
+    df["data_arquivo"] = pd.to_datetime(df["data_arquivo"], errors="coerce")
     return df
-
+    
 # ── Sidebar: Upload + Filtros ─────────────────────────────────────────────────
 def sidebar_upload_e_filtros(df):
     st.sidebar.image(
