@@ -70,21 +70,13 @@ def sidebar_upload_e_filtros(df):
             salvos += 1
         st.sidebar.success(f"✅ {salvos} arquivo(s) salvo(s)!")
 
-           if arquivos_upload:
-        os.makedirs(DIR_UPLOADS, exist_ok=True)
-        salvos = 0
-        for arq in arquivos_upload:
-            destino = os.path.join(DIR_UPLOADS, arq.name)
-            with open(destino, "wb") as f:
-                f.write(arq.read())
-            salvos += 1
-        st.sidebar.success(f"✅ {salvos} arquivo(s) salvo(s)!")
-
         if st.sidebar.button("▶️ Processar agora", type="primary"):
             with st.spinner("Processando CSVs..."):
                 processar.processar_novos()
             st.cache_data.clear()
             st.rerun()
+
+    st.sidebar.markdown("---")
 
     # ── Filtros ───────────────────────────────────────────────────────────────
     filtros = {}
@@ -105,7 +97,7 @@ def sidebar_upload_e_filtros(df):
         )
     else:
         filtros["data_inicio"] = datas_disponiveis[-1] if datas_disponiveis else None
-        filtros["data_fim"]    = filtros["data_inicio"]
+        filtros["data_fim"] = filtros["data_inicio"]
         st.sidebar.info(f"Data: {filtros['data_inicio']}")
 
     estados = ["Todos"] + sorted(df["uf"].dropna().unique().tolist())
@@ -121,7 +113,6 @@ def sidebar_upload_e_filtros(df):
         "⚠️ Somente críticos (+90 dias)", value=False
     )
 
-    st.sidebar.markdown("**Faixa de dias parado:**")
     opcoes_bucket = [
         "Todos", "0–30 dias", "31–60 dias", "61–90 dias",
         "91–180 dias", "181–365 dias", "365+ dias"
@@ -141,7 +132,7 @@ def sidebar_upload_e_filtros(df):
     )
 
     return filtros
-
+    
 # ── Aplicar filtros ao DataFrame ──────────────────────────────────────────────
 def aplicar_filtros(df, filtros):
     if df.empty or not filtros:
