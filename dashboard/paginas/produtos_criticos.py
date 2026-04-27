@@ -10,15 +10,11 @@ from componentes.kpis import formatar_brl, formatar_int, formatar_pct
 # ─────────────────────────────────────────────────────────────────────────────
 
 def gerar_sugestao(row):
-    """
-    Regras de negócio para sugestão automática por SKU.
-    Retorna string com ação recomendada.
-    """
-    dias   = row.get("dias_estoque") or 0
-    giro   = row.get("giro")         or 0
-    mkp    = row.get("mkp_pct")      or 0
-    saldo  = row.get("saldo")        or 0
-    valor  = row.get("valor_custo")  or 0
+    dias   = float(row.get("dias_estoque") or 0)
+    giro   = float(row.get("giro")         or 0)
+    mkp    = float(row.get("mkp_pct")      or 0)
+    saldo  = float(row.get("saldo")        or 0)
+    valor  = float(row.get("valor_custo")  or 0)
 
     if dias >= 365:
         return "🔴 LIQUIDAR — Parado há mais de 1 ano"
@@ -35,21 +31,18 @@ def gerar_sugestao(row):
     return "✅ Normal"
 
 def gerar_lista_transferencias(df):
-    """
-    Identifica SKUs que:
-    - Estão CRÍTICOS (>=90d, giro=0) em uma filial (origem)
-    - Têm venda recente (ultima_venda nos últimos 30d) em outra filial (destino)
-    Retorna DataFrame com sugestões de transferência.
-    """
-    data_ref = df["data_arquivo"].max()
+    if "data_arquivo" not in df.columns or df["data_arquivo"].isna().all():
+        return pd.DataFrame()
+
+    data_ref = pd.to_datetime(df["data_arquivo"]).max()
     limite_venda_recente = data_ref - pd.Timedelta(days=30)
 
-    # Críticos sem giro
     criticos = df[
         (df["critico"] == True) &
         (df["giro"].fillna(0) == 0)
     ][["codigo_sku", "descricao", "filial_nome", "saldo",
        "valor_custo", "dias_estoque"]].copy()
+
     criticos = criticos.rename(columns={
         "filial_nome":  "filial_origem",
         "saldo":        "saldo_origem",
@@ -57,18 +50,23 @@ def gerar_lista_transferencias(df):
         "dias_estoque": "dias_origem"
     })
 
-    # Filiais com venda recente do mesmo SKU
-    com_venda = df[
-        df["ultima_venda"].notna() &
-        (df["ultima_venda"] >= limite_venda_recente) &
-        (df["giro"].fillna(0) > 0)
+    if "ultima_venda" not in df.columns:
+        return pd.DataFrame()
+
+    df_uv = df.copy()
+    df_uv["ultima_venda"] = pd.to_datetime(df_uv["ultima_venda"], errors="coerce")
+
+    com_venda = df_uv[
+        df_uv["ultima_venda"].notna() &
+        (df_uv["ultima_venda"] >= limite_venda_recente) &
+        (df_uv["giro"].fillna(0) > 0)
     ][["codigo_sku", "filial_nome", "ultima_venda", "giro"]].copy()
+
     com_venda = com_venda.rename(columns={
         "filial_nome": "filial_destino",
         "giro":        "giro_destino"
     })
 
-    # JOIN: mesmo SKU, filiais diferentes
     sugestoes = criticos.merge(com_venda, on="codigo_sku", how="inner")
     sugestoes = sugestoes[
         sugestoes["filial_origem"] != sugestoes["filial_destino"]
@@ -77,9 +75,8 @@ def gerar_lista_transferencias(df):
     if sugestoes.empty:
         return pd.DataFrame()
 
-    # Quantidade sugerida: 50% do saldo parado (arredondado)
     sugestoes["qty_sugerida"] = (sugestoes["saldo_origem"] * 0.5).apply(
-        lambda x: max(1, round(x))
+        lambda x: max(1, round(float(x))) if pd.notna(x) else 1
     )
     sugestoes["impacto_estimado"] = (
         sugestoes["qty_sugerida"] /
@@ -98,7 +95,7 @@ def exportar_excel(df_export):
     """Gera arquivo Excel em memória para download."""
     output = BytesIO()
     with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df_export.to_excel(writer, index=False, sheet_name="Produtos_Criticos")
+        df_export.to_excel(writer, index=False, sheet_name="Dados")
     return output.getvalue()
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -106,8 +103,6 @@ def exportar_excel(df_export):
 # ─────────────────────────────────────────────────────────────────────────────
 
 def pagina_produtos_criticos(df):
-    """Aba 5 — Lista acionável de produtos críticos + sugestões."""
-
     if df.empty:
         st.warning("Nenhum dado para os filtros selecionados.")
         return
@@ -116,32 +111,33 @@ def pagina_produtos_criticos(df):
 
     df_critico = df[df["critico"] == True].copy()
 
+    # Garantir codigo_sku como string
+    if "codigo_sku" in df_critico.columns:
+        df_critico["codigo_sku"] = df_critico["codigo_sku"].astype(str)
+
     if df_critico.empty:
         st.success("✅ Nenhum item crítico encontrado para os filtros selecionados!")
         return
 
     # ── KPIs rápidos ──────────────────────────────────────────────────────────
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("SKUs Críticos",   formatar_int(df_critico["codigo_sku"].nunique()))
-    k2.metric("Valor Parado",    formatar_brl(df_critico["valor_custo"].sum()))
-    k3.metric("Dias Médio",      f"{df_critico['dias_estoque'].mean():.0f}d")
-    k4.metric("Filiais Afetadas",formatar_int(df_critico["filial_nome"].nunique()))
+    k1.metric("SKUs Críticos",    formatar_int(df_critico["codigo_sku"].nunique()))
+    k2.metric("Valor Parado",     formatar_brl(df_critico["valor_custo"].sum()))
+    k3.metric("Dias Médio",       f"{df_critico['dias_estoque'].mean():.0f}d")
+    k4.metric("Filiais Afetadas", formatar_int(df_critico["filial_nome"].nunique()))
 
     st.markdown("---")
 
-    # ── Sub-abas internas ─────────────────────────────────────────────────────
     sub1, sub2, sub3 = st.tabs([
         "📋 Tabela Completa",
         "🔄 Transferências Sugeridas",
         "📌 Por Ação Recomendada"
     ])
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # SUB-ABA 1 — Tabela completa com busca e exportação
-    # ═════════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════
+    # SUB-ABA 1 — Tabela completa
+    # ═══════════════════════════════════════════════════════════════════════
     with sub1:
-
-        # Filtros rápidos internos
         col_f1, col_f2, col_f3, col_f4 = st.columns(4)
 
         with col_f1:
@@ -164,17 +160,15 @@ def pagina_produtos_criticos(df):
         with col_f4:
             ordenar_por = st.selectbox(
                 "Ordenar por",
-                ["Valor Parado ↓", "Dias Parado ↓",
-                 "Saldo ↓", "Giro ↑"]
+                ["Valor Parado ↓", "Dias Parado ↓", "Saldo ↓", "Giro ↑"]
             )
 
-        # Aplicar filtros internos
         df_view = df_critico.copy()
 
         if busca:
             mask = (
                 df_view["codigo_sku"].str.contains(busca, case=False, na=False) |
-                df_view["descricao"].str.contains(busca, case=False, na=False)
+                df_view["descricao"].astype(str).str.contains(busca, case=False, na=False)
             )
             df_view = df_view[mask]
 
@@ -184,7 +178,6 @@ def pagina_produtos_criticos(df):
         if depto_sel != "Todos":
             df_view = df_view[df_view["departamento"] == depto_sel]
 
-        # Ordenação
         ordem_map = {
             "Valor Parado ↓": ("valor_custo",  False),
             "Dias Parado ↓":  ("dias_estoque", False),
@@ -192,12 +185,11 @@ def pagina_produtos_criticos(df):
             "Giro ↑":         ("giro",         True),
         }
         col_ord, asc_ord = ordem_map[ordenar_por]
-        df_view = df_view.sort_values(col_ord, ascending=asc_ord)
+        if col_ord in df_view.columns:
+            df_view = df_view.sort_values(col_ord, ascending=asc_ord)
 
-        # Gerar sugestão automática
         df_view["sugestao"] = df_view.apply(gerar_sugestao, axis=1)
 
-        # Selecionar e formatar colunas para exibição
         colunas_exibir = [
             c for c in [
                 "filial_nome", "departamento", "codigo_sku", "descricao",
@@ -208,9 +200,11 @@ def pagina_produtos_criticos(df):
             ] if c in df_view.columns
         ]
 
+        # Guardar cópia numérica para exportação ANTES de formatar
+        df_export_raw = df_view[colunas_exibir].copy()
+
         df_exibir = df_view[colunas_exibir].copy()
 
-        # Formatar colunas monetárias
         for col_moeda in ["valor_custo", "valor_venda", "venda_m0", "venda_m1", "venda_m2"]:
             if col_moeda in df_exibir.columns:
                 df_exibir[col_moeda] = df_exibir[col_moeda].apply(
@@ -227,7 +221,6 @@ def pagina_produtos_criticos(df):
                 lambda x: f"{x:.0f}d" if pd.notna(x) else "-"
             )
 
-        # Renomear para exibição amigável
         rename_map = {
             "filial_nome":    "Filial",
             "departamento":   "Depto",
@@ -254,7 +247,6 @@ def pagina_produtos_criticos(df):
             f"| Valor total: **{formatar_brl(df_view['valor_custo'].sum())}**"
         )
 
-        # Tabela interativa
         st.dataframe(
             df_exibir,
             use_container_width=True,
@@ -262,11 +254,10 @@ def pagina_produtos_criticos(df):
             height=500
         )
 
-        # ── Botões de exportação ──────────────────────────────────────────────
         col_exp1, col_exp2, _ = st.columns([1, 1, 3])
 
         with col_exp1:
-            csv_bytes = df_view[colunas_exibir].to_csv(
+            csv_bytes = df_export_raw.to_csv(
                 index=False, sep=";", encoding="utf-8-sig"
             ).encode("utf-8-sig")
             st.download_button(
@@ -277,7 +268,7 @@ def pagina_produtos_criticos(df):
             )
 
         with col_exp2:
-            excel_bytes = exportar_excel(df_view[colunas_exibir])
+            excel_bytes = exportar_excel(df_export_raw)
             st.download_button(
                 label="⬇️ Exportar Excel",
                 data=excel_bytes,
@@ -285,14 +276,14 @@ def pagina_produtos_criticos(df):
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-    # ═════════════════════════════════════════════════════════════════════════
-    # SUB-ABA 2 — Transferências sugeridas entre filiais
-    # ═════════════════════════════════════════════════════════════════════════
+    # ═══════════════════════════════════════════════════════════════════════
+    # SUB-ABA 2 — Transferências sugeridas
+    # ═══════════════════════════════════════════════════════════════════════
     with sub2:
         st.markdown("""
         ### 🔄 Sugestões de Transferência entre Filiais
 
-        **Lógica:** SKU está crítico (≥90d, giro=0) na **Filial Origem** e teve venda
+        **Lógica:** SKU crítico (≥90d, giro=0) na **Filial Origem** com venda
         nos últimos 30 dias na **Filial Destino**. Quantidade sugerida = 50% do saldo parado.
         """)
 
@@ -306,26 +297,14 @@ def pagina_produtos_criticos(df):
                 "em nenhuma outra filial no período recente."
             )
         else:
-            # KPIs da transferência
             t1, t2, t3 = st.columns(3)
-            t1.metric(
-                "SKUs com sugestão",
-                formatar_int(df_transf["codigo_sku"].nunique())
-            )
-            t2.metric(
-                "Impacto estimado",
-                formatar_brl(df_transf["impacto_estimado"].sum())
-            )
-            t3.metric(
-                "Pares Origem→Destino",
-                formatar_int(len(df_transf))
-            )
+            t1.metric("SKUs com sugestão",  formatar_int(df_transf["codigo_sku"].nunique()))
+            t2.metric("Impacto estimado",   formatar_brl(df_transf["impacto_estimado"].sum()))
+            t3.metric("Pares Origem→Destino", formatar_int(len(df_transf)))
 
-            # Gráfico de impacto por filial destino
             impacto_destino = (
                 df_transf.groupby("filial_destino")["impacto_estimado"]
-                .sum()
-                .reset_index()
+                .sum().reset_index()
                 .sort_values("impacto_estimado", ascending=False)
             )
             fig_transf = px.bar(
@@ -333,153 +312,5 @@ def pagina_produtos_criticos(df):
                 x="filial_destino", y="impacto_estimado",
                 color="impacto_estimado",
                 color_continuous_scale="Greens",
-                labels={
-                    "filial_destino":    "Filial Destino",
-                    "impacto_estimado":  "Impacto Estimado (R$)"
-                },
-                text=impacto_destino["impacto_estimado"].apply(formatar_brl),
-                title="💚 Impacto Estimado por Filial Destino"
-            )
-            fig_transf.update_traces(textposition="outside")
-            fig_transf.update_layout(
-                height=350, showlegend=False,
-                plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-                font_color="white", coloraxis_showscale=False
-            )
-            st.plotly_chart(fig_transf, use_container_width=True)
-
-            # Tabela detalhada
-            df_transf_exib = df_transf.copy()
-            df_transf_exib["impacto_estimado"] = df_transf_exib[
-                "impacto_estimado"
-            ].apply(formatar_brl)
-            df_transf_exib["ultima_venda"] = pd.to_datetime(
-                df_transf_exib["ultima_venda"]
-            ).dt.strftime("%d/%m/%Y")
-
-            st.dataframe(
-                df_transf_exib.rename(columns={
-                    "codigo_sku":       "SKU",
-                    "descricao":        "Descrição",
-                    "filial_origem":    "Origem",
-                    "saldo_origem":     "Saldo Origem",
-                    "dias_origem":      "Dias Parado",
-                    "filial_destino":   "Destino",
-                    "giro_destino":     "Giro Destino",
-                    "ultima_venda":     "Últ. Venda Destino",
-                    "qty_sugerida":     "Qty Sugerida",
-                    "impacto_estimado": "Impacto (R$)"
-                }),
-                use_container_width=True,
-                hide_index=True,
-                height=420
-            )
-
-            # Exportar transferências
-            excel_transf = exportar_excel(df_transf)
-            st.download_button(
-                label="⬇️ Exportar Transferências Excel",
-                data=excel_transf,
-                file_name="sugestoes_transferencia.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-    # ═════════════════════════════════════════════════════════════════════════
-    # SUB-ABA 3 — Agrupamento por ação recomendada
-    # ═════════════════════════════════════════════════════════════════════════
-    with sub3:
-        st.markdown("### 📌 Produtos Agrupados por Ação Recomendada")
-
-        df_acoes = df_critico.copy()
-        df_acoes["sugestao"] = df_acoes.apply(gerar_sugestao, axis=1)
-
-        # Resumo por ação
-        resumo = (
-            df_acoes.groupby("sugestao")
-            .agg(
-                qtd_skus    = ("codigo_sku",  "nunique"),
-                valor_total = ("valor_custo", "sum"),
-                filiais     = ("filial_nome", "nunique")
-            )
-            .reset_index()
-            .sort_values("valor_total", ascending=False)
-        )
-
-        col_r1, col_r2 = st.columns([2, 3])
-
-        with col_r1:
-            st.markdown("**Resumo por Ação**")
-            resumo["Valor Total"]  = resumo["valor_total"].apply(formatar_brl)
-            resumo["SKUs"]         = resumo["qtd_skus"].apply(formatar_int)
-            resumo["Filiais"]      = resumo["filiais"].apply(formatar_int)
-            st.dataframe(
-                resumo[["sugestao", "SKUs", "Filiais", "Valor Total"]].rename(
-                    columns={"sugestao": "Ação Recomendada"}
-                ),
-                use_container_width=True,
-                hide_index=True
-            )
-
-        with col_r2:
-            fig_acoes = px.pie(
-                resumo,
-                names="sugestao",
-                values="valor_total",
-                hole=0.4,
-                color_discrete_sequence=px.colors.qualitative.Set2,
-                title="Distribuição do Valor Parado por Ação"
-            )
-            fig_acoes.update_layout(
-                height=340,
-                plot_bgcolor="#0e1117", paper_bgcolor="#0e1117",
-                font_color="white"
-            )
-            st.plotly_chart(fig_acoes, use_container_width=True)
-
-        # Expandir cada grupo
-        st.markdown("---")
-        st.markdown("**🔍 Ver itens por ação:**")
-
-        acoes_unicas = sorted(df_acoes["sugestao"].unique().tolist())
-        acao_sel = st.selectbox("Selecione uma ação:", acoes_unicas)
-
-        if acao_sel:
-            df_grupo = df_acoes[df_acoes["sugestao"] == acao_sel][[
-                "filial_nome", "departamento", "codigo_sku", "descricao",
-                "saldo", "dias_estoque", "ultima_venda",
-                "valor_custo", "mkp_pct", "giro"
-            ]].sort_values("valor_custo", ascending=False)
-
-            df_grupo["valor_custo"]  = df_grupo["valor_custo"].apply(formatar_brl)
-            df_grupo["dias_estoque"] = df_grupo["dias_estoque"].apply(
-                lambda x: f"{x:.0f}d" if pd.notna(x) else "-"
-            )
-            df_grupo["mkp_pct"]      = df_grupo["mkp_pct"].apply(
-                lambda x: f"{x:.1f}%" if pd.notna(x) else "-"
-            )
-
-            st.dataframe(
-                df_grupo.rename(columns={
-                    "filial_nome":  "Filial",
-                    "departamento": "Depto",
-                    "codigo_sku":   "SKU",
-                    "descricao":    "Descrição",
-                    "saldo":        "Saldo",
-                    "dias_estoque": "Dias",
-                    "ultima_venda": "Últ. Venda",
-                    "valor_custo":  "Custo (R$)",
-                    "mkp_pct":      "%MKP",
-                    "giro":         "Giro"
-                }),
-                use_container_width=True,
-                hide_index=True,
-                height=420
-            )
-
-            excel_grupo = exportar_excel(df_grupo)
-            st.download_button(
-                label=f"⬇️ Exportar '{acao_sel}' Excel",
-                data=excel_grupo,
-                file_name=f"criticos_{acao_sel[:20].strip()}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+                labels={"filial_destino": "Filial Destino", "impacto_estimado": "Impacto (R$)"},
+                text=impacto_destino["impac
